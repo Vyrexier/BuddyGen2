@@ -241,6 +241,7 @@ local module = {}
 
 module._onSend = nil
 module._onReceive = nil
+module.Get = BuddyUI.Get
 
 -- Callbacks
 function module:AttachOnSend(callback)
