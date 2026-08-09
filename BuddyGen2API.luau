@@ -1,5 +1,32 @@
 -- Buddy.lua
-local BuddyUI = require(script.Parent.BuddyGen2_UI) or loadstring(game:HttpGet("https://raw.githubusercontent.com/Vyrexier/BuddyGen2/refs/heads/main/BuddyGen2API.luau",true))()
+local BuddyUI
+local Success, Result = pcall(function()
+	return loadstring(
+		game:HttpGet(
+			"https://raw.githubusercontent.com/Vyrexier/BuddyGen2/refs/heads/main/BuddyGen2_UI.luau",
+			true
+		)
+	)()
+end)
+
+if Success and Result then
+	BuddyUI = Result
+else
+	local RequireSuccess, RequireResult = pcall(function()
+		return require(script.Parent.BuddyGen2_UI)
+	end)
+
+	if RequireSuccess and RequireResult then
+		BuddyUI = RequireResult
+	else
+		error(
+			"[BuddyGen2] Failed to load BuddyUI\n" ..
+				"HttpGet: " .. tostring(Result) .. "\n" ..
+				"Require: " .. tostring(RequireResult)
+		)
+	end
+end
+
 local Players = game:GetService("Players")
 local TextService = game:GetService("TextService")
 local TweenService = game:GetService("TweenService")
