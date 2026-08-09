@@ -50,6 +50,7 @@ local Providers = {
 		end,
 		Parse = function(body)
 			local data = HttpService:JSONDecode(body)
+			print("[Local Model]", body)
 			if data.error then
 				return false, data.error
 			end
