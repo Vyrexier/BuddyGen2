@@ -1542,6 +1542,12 @@ Tools["fs_load_file"] = {
 }
 
 function ToolModule.GetToolList()
+	
+	print("[BuddyTools] UnlockedCategories:")
+	for cat in UnlockedCategories do
+		print(" -", cat)
+	end
+	
 	local list = {}
 
 	table.insert(list, {
@@ -1553,20 +1559,22 @@ function ToolModule.GetToolList()
 		}
 	})
 
-	for cat in UnlockedCategories do
-		local catTools = Categories[cat]
-		if catTools then
-			for _, toolName in catTools do
-				local tool = Tools[toolName]
-				if tool then
-					table.insert(list, {
-						type = "function",
-						["function"] = {
-							name = toolName,
-							description = tool.Description,
-							parameters = tool.Parameters
-						}
-					})
+	for cat, enabled in UnlockedCategories do
+		if enabled then
+			local catTools = Categories[cat]
+			if catTools then
+				for _, toolName in catTools do
+					local tool = Tools[toolName]
+					if tool then
+						table.insert(list, {
+							type = "function",
+							["function"] = {
+								name = toolName,
+								description = tool.Description,
+								parameters = tool.Parameters
+							}
+						})
+					end
 				end
 			end
 		end
