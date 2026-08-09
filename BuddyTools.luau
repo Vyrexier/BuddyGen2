@@ -103,21 +103,32 @@ Tools["buddy_request_tools"] = {
 	Function = function(args)
 		if args.action == "list" then
 			local result = {}
-			for name, desc in CategoryInfo do
+			for name, desc in pairs(CategoryInfo) do
 				table.insert(result, name .. ": " .. desc)
+			end
+			if #result == 0 then
+				return "No categories available"
 			end
 			return table.concat(result, "\n")
 
 		elseif args.action == "unlock" then
+			if not args.categories or #args.categories == 0 then
+				return "No categories specified"
+			end
 			local unlocked = {}
-			for _, cat in args.categories do
+			for _, cat in ipairs(args.categories) do
 				if CategoryInfo[cat] then
 					UnlockedCategories[cat] = true
 					table.insert(unlocked, cat)
 				end
 			end
+			if #unlocked == 0 then
+				return "No valid categories found"
+			end
 			return "Unlocked: " .. table.concat(unlocked, ", ")
 		end
+
+		return "Unknown action: " .. tostring(args.action)
 	end
 }
 
@@ -560,47 +571,56 @@ Tools["roblox_query"] = {
 	Parameters = {
 		type = "object",
 		properties = {
-			root = { type = "string", description = "Root path to search from. Default: game" },
+			root = { type = "string", description = "Root path to search from. Defaults to current checkpoint. Use 'game.Workspace' to search only in the world." },
 			name = { type = "string", description = "Fuzzy name match e.g. 'Base' matches 'Baseplate'" },
 			class_name = { type = "string", description = "Exact ClassName e.g. Part, Script, RemoteEvent" },
 			tag = { type = "string", description = "CollectionService tag to filter by" },
+			workspace_only = { type = "boolean", description = "If true, search only inside game.Workspace" },
 			property = {
 				type = "object",
 				description = "Filter by property value e.g. {name='BrickColor', value='Bright red'}",
 				properties = {
 					name = { type = "string" },
 					value = { type = "string" }
-				}
+				},
+				required = {"name", "value"}
 			},
 			radius = {
 				type = "object",
-				description = "Search within radius of a position",
+				description = "Search within radius of a world position. Requires BasePart.",
 				properties = {
 					x = { type = "number" },
 					y = { type = "number" },
 					z = { type = "number" },
 					distance = { type = "number" }
-				}
+				},
+				required = {"x", "y", "z", "distance"}
 			},
-			depth = { type = "number", description = "Max search depth. Default: 5" },
-			limit = { type = "number", description = "Max results. Default: 20" }
+			depth = { type = "number", description = "Max search depth. Default: 5. Lower = faster." },
+			limit = { type = "number", description = "Max results to return. Default: 20. Max: 100." }
 		},
 		required = {}
 	},
 	Function = function(args)
-		local root = args.root and ResolvePath(args.root) or CurrentCheckpoint
-		if not root then return "Root not found: " .. args.root end
+		-- workspace_only override
+		local root
+		if args.workspace_only then
+			root = workspace
+		elseif args.root then
+			root = ResolvePath(args.root)
+			if not root then return "Root not found: " .. args.root end
+		else
+			root = CurrentCheckpoint
+		end
 
-		local depth = args.depth or 5
-		local limit = args.limit or 20
+		local depth = math.min(args.depth or 5, 10)
+		local limit = math.min(args.limit or 20, 100)
 		local results = {}
 
-		-- Fuzzy match helper
 		local function fuzzyMatch(a, b)
 			return a:lower():find(b:lower(), 1, true) ~= nil
 		end
 
-		-- Property match helper
 		local function matchProperty(inst, prop)
 			local ok, val = pcall(function()
 				return tostring(inst[prop.name])
@@ -608,43 +628,29 @@ Tools["roblox_query"] = {
 			return ok and val == prop.value
 		end
 
-		-- Radius check helper
 		local function inRadius(inst, r)
+			if not inst:IsA("BasePart") then return false end
 			local pos = Vector3.new(r.x, r.y, r.z)
-			local ok, instPos = pcall(function()
-				return inst:IsA("BasePart") and inst.Position
-			end)
-			if not ok or not instPos then return false end
-			return (instPos - pos).Magnitude <= r.distance
+			return (inst.Position - pos).Magnitude <= r.distance
 		end
 
 		local function search(inst, currentDepth)
 			if currentDepth <= 0 or #results >= limit then return end
-
 			for _, child in inst:GetChildren() do
 				local pass = true
 
-				-- Name fuzzy
 				if args.name and not fuzzyMatch(child.Name, args.name) then
 					pass = false
 				end
-
-				-- ClassName
 				if pass and args.class_name and child.ClassName ~= args.class_name then
 					pass = false
 				end
-
-				-- Tag
 				if pass and args.tag and not CollectionService:HasTag(child, args.tag) then
 					pass = false
 				end
-
-				-- Property
 				if pass and args.property and not matchProperty(child, args.property) then
 					pass = false
 				end
-
-				-- Radius
 				if pass and args.radius and not inRadius(child, args.radius) then
 					pass = false
 				end
@@ -661,9 +667,8 @@ Tools["roblox_query"] = {
 			end
 		end
 
-		if args.tag and not args.name and not args.class_name and not args.property and not args.radius then
-			local tagged = CollectionService:GetTagged(args.tag)
-			for _, inst in tagged do
+		if args.tag and not args.name and not args.class_name and not args.property and not args.radius and not args.workspace_only then
+			for _, inst in CollectionService:GetTagged(args.tag) do
 				if #results >= limit then break end
 				table.insert(results, {
 					Name = inst.Name,
