@@ -70,6 +70,7 @@ function Module.Send(provider, model, apiKey, messages, tools , callback)
 	local config = Providers[provider]
 	if not config then
 		callback(false, "Unknown provider: " .. tostring(provider))
+		warn("Unknown provider: " .. tostring(provider))
 		return
 	end
 	
@@ -85,11 +86,13 @@ function Module.Send(provider, model, apiKey, messages, tools , callback)
 
 		if not ok then
 			callback(false, "Request failed: " .. tostring(response))
+			warn("[Provider]".."Request failed: " .. tostring(response))
 			return
 		end
 
 		if not response.Success then
-			callback(false, "HTTP " .. tostring(response.StatusCode))
+			callback(false, "HTTP " .. tostring(response.StatusCode).."\n" .. tostring(response.Body))
+			warn("[Provider]"..tostring(response.StatusCode).."\n" .. tostring(response.Body))
 			return
 		end
 
