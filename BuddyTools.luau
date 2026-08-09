@@ -8,6 +8,7 @@ local InstanceCache = {}
 
 -- Session state
 local UnlockedCategories = {}
+local InstanceCache = {}
 local CurrentCheckpoint = game
 
 local function GetTimeStamp()
@@ -1569,6 +1570,11 @@ function ToolModule.GetToolList()
 				end
 			end
 		end
+	end
+
+	print("[BuddyTools] Tools sent:", #list)
+	for _, t in list do
+		print(" -", t["function"].name)
 	end
 
 	return list
