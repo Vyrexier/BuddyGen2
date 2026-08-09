@@ -1645,8 +1645,13 @@ function ToolModule.HandleToolCall(toolCall)
 		return false, "Unknown tool: " .. name
 	end
 
-	local ok, args = pcall(HttpService.JSONDecode, HttpService, toolCall["function"].arguments)
-	if not ok then return false, "Invalid arguments" end
+	local args = toolCall["function"].arguments
+
+	if type(args) == "string" then
+		local ok, decoded = pcall(HttpService.JSONDecode, HttpService, args)
+		if not ok then return false, "Invalid arguments" end
+		args = decoded
+	end
 
 	local success, result = pcall(tool.Function, args)
 	if not success then return false, "Error: " .. tostring(result) end
