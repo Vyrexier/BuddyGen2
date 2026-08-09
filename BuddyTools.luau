@@ -141,9 +141,7 @@ Tools["roblox_list_cache"] = {
 	Category = "roblox_cache",
 	Description = "List all cached instances",
 	Parameters = {
-		type = "object",
-		properties = {},
-		required = {}
+		type = "object"
 	},
 	Function = function(args)
 		local entries = {}
