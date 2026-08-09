@@ -49,7 +49,8 @@ local Categories = {
 		"roblox_get_property",
 		"roblox_get_attribute",
 		"roblox_get_attributes",
-		"roblox_get_tags"
+		"roblox_get_tags",
+		"roblox_get_instances_in_radius"
 	},
 	roblox_cache = {
 		"roblox_cache_instance",
@@ -752,6 +753,49 @@ Tools["roblox_get_timestamp"] = {
 
 	Function = function()
 		return GetTimeStamp()
+	end
+}
+
+Tools["roblox_get_instances_in_radius"] = {
+	Category = "roblox_read",
+	Description = "Get all BaseParts within a radius of a world position",
+	Parameters = {
+		type = "object",
+		properties = {
+			x = { type = "number", description = "World position X" },
+			y = { type = "number", description = "World position Y" },
+			z = { type = "number", description = "World position Z" },
+			radius = { type = "number", description = "Search radius in studs" },
+			limit = { type = "number", description = "Max results. Default: 50" }
+		},
+		required = {"x", "y", "z", "radius"}
+	},
+	Function = function(args)
+		local position = Vector3.new(args.x, args.y, args.z)
+		local limit = math.min(args.limit or 50, 200)
+
+		local params = OverlapParams.new()
+		params.MaxParts = limit
+
+		local parts = workspace:GetPartBoundsInRadius(position, args.radius, params)
+
+		if #parts == 0 then return "No instances found" end
+
+		local results = {}
+		for _, part in parts do
+			table.insert(results, {
+				Name = part.Name,
+				ClassName = part.ClassName,
+				Path = part:GetFullName(),
+				Position = {
+					X = math.round(part.Position.X * 100) / 100,
+					Y = math.round(part.Position.Y * 100) / 100,
+					Z = math.round(part.Position.Z * 100) / 100
+				}
+			})
+		end
+
+		return HttpService:JSONEncode(results)
 	end
 }
 
