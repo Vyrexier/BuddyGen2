@@ -568,48 +568,80 @@ Tools["roblox_clear_cache"] = {
 
 Tools["roblox_query"] = {
 	Category = "roblox_read",
-	Description = "Query instances with flexible filters. Supports name fuzzy match, ClassName, property value, tag, and radius search. Returns full path of each result.",
+
+	Description = "Query Roblox instances with flexible filters and fuzzy name search. Supports approximate name matching, ClassName, property value, CollectionService tag, depth limits, and ranked results. Returns full paths of matching instances.",
+
 	Parameters = {
 		type = "object",
 		properties = {
-			root = { type = "string", description = "Root path to search from. Defaults to current checkpoint. Use 'game.Workspace' to search only in the world." },
-			name = { type = "string", description = "Fuzzy name match e.g. 'Base' matches 'Baseplate'" },
-			class_name = { type = "string", description = "Exact ClassName e.g. Part, Script, RemoteEvent" },
-			tag = { type = "string", description = "CollectionService tag to filter by" },
-			workspace_only = { type = "boolean", description = "If true, search only inside game.Workspace" },
+			root = {
+				type = "string",
+				description = "Root path to search from. Defaults to current checkpoint. Use 'game.Workspace' to search only in the world."
+			},
+
+			name = {
+				type = "string",
+				description = "Fuzzy name search. Finds exact, partial, similar, and misspelled names. Examples: 'Zone' can match 'Zones', 'SafeZone', 'ZonePart', or minor typos."
+			},
+
+			class_name = {
+				type = "string",
+				description = "Exact Roblox ClassName filter. Example: Part, Model, Folder, Script, RemoteEvent."
+			},
+
+			tag = {
+				type = "string",
+				description = "CollectionService tag to filter by."
+			},
+
+			workspace_only = {
+				type = "boolean",
+				description = "If true, search only inside game.Workspace."
+			},
+
 			property = {
 				type = "object",
-				description = "Filter by property value e.g. {name='BrickColor', value='Bright red'}",
+				description = "Filter by property value. Example: {name='BrickColor', value='Bright red'}",
 				properties = {
-					name = { type = "string" },
-					value = { type = "string" }
+					name = {
+						type = "string"
+					},
+
+					value = {
+						type = "string"
+					}
 				},
-				required = {"name", "value"}
+				required = {
+					"name",
+					"value"
+				}
 			},
-			radius = {
-				type = "object",
-				description = "Search within radius of a world position. Requires BasePart.",
-				properties = {
-					x = { type = "number" },
-					y = { type = "number" },
-					z = { type = "number" },
-					distance = { type = "number" }
-				},
-				required = {"x", "y", "z", "distance"}
+
+			depth = {
+				type = "number",
+				description = "Maximum search depth. Default: 5. Maximum: 10."
 			},
-			depth = { type = "number", description = "Max search depth. Default: 5. Lower = faster." },
-			limit = { type = "number", description = "Max results to return. Default: 20. Max: 100." }
+
+			limit = {
+				type = "number",
+				description = "Maximum number of results. Default: 20. Maximum: 100."
+			}
 		},
+
 		required = {}
 	},
+
 	Function = function(args)
-		-- workspace_only override
 		local root
+
 		if args.workspace_only then
 			root = workspace
 		elseif args.root then
 			root = ResolvePath(args.root)
-			if not root then return "Root not found: " .. args.root end
+
+			if not root then
+				return "Root not found: " .. args.root
+			end
 		else
 			root = CurrentCheckpoint
 		end
@@ -618,73 +650,288 @@ Tools["roblox_query"] = {
 		local limit = math.min(args.limit or 20, 100)
 		local results = {}
 
-		local function fuzzyMatch(a, b)
-			return a:lower():find(b:lower(), 1, true) ~= nil
+		local function levenshtein(a, b)
+			a = a:lower()
+			b = b:lower()
+
+			local lenA = #a
+			local lenB = #b
+
+			if lenA == 0 then
+				return lenB
+			end
+
+			if lenB == 0 then
+				return lenA
+			end
+
+			local previous = table.create(lenB + 1)
+			local current = table.create(lenB + 1)
+
+			for j = 0, lenB do
+				previous[j + 1] = j
+			end
+
+			for i = 1, lenA do
+				current[1] = i
+
+				for j = 1, lenB do
+					local cost = a:sub(i, i) == b:sub(j, j) and 0 or 1
+
+					current[j + 1] = math.min(
+						current[j] + 1,
+						previous[j + 1] + 1,
+						previous[j] + cost
+					)
+				end
+
+				previous, current = current, previous
+			end
+
+			return previous[lenB + 1]
+		end
+
+		local function levenshteinSimilarity(a, b)
+			a = a:lower()
+			b = b:lower()
+
+			local maxLength = math.max(#a, #b)
+
+			if maxLength == 0 then
+				return 1
+			end
+
+			return 1 - levenshtein(a, b) / maxLength
+		end
+
+		local function jaro(a, b)
+			a = a:lower()
+			b = b:lower()
+
+			if a == b then
+				return 1
+			end
+
+			local lenA = #a
+			local lenB = #b
+
+			if lenA == 0 or lenB == 0 then
+				return 0
+			end
+
+			local matchDistance = math.max(
+				math.floor(math.max(lenA, lenB) / 2) - 1,
+				0
+			)
+
+			local matchA = table.create(lenA, false)
+			local matchB = table.create(lenB, false)
+
+			local matches = 0
+
+			for i = 1, lenA do
+				local startIndex = math.max(1, i - matchDistance)
+				local endIndex = math.min(i + matchDistance, lenB)
+
+				for j = startIndex, endIndex do
+					if not matchB[j] and a:sub(i, i) == b:sub(j, j) then
+						matchA[i] = true
+						matchB[j] = true
+						matches += 1
+						break
+					end
+				end
+			end
+
+			if matches == 0 then
+				return 0
+			end
+
+			local transpositions = 0
+			local k = 1
+
+			for i = 1, lenA do
+				if matchA[i] then
+					while not matchB[k] do
+						k += 1
+					end
+
+					if a:sub(i, i) ~= b:sub(k, k) then
+						transpositions += 1
+					end
+
+					k += 1
+				end
+			end
+
+			return (
+				(matches / lenA)
+					+ (matches / lenB)
+					+ ((matches - transpositions / 2) / matches)
+			) / 3
+		end
+
+		local function jaroWinkler(a, b)
+			local score = jaro(a, b)
+			local prefix = 0
+			local maxPrefix = math.min(4, #a, #b)
+
+			for i = 1, maxPrefix do
+				if a:sub(i, i):lower() == b:sub(i, i):lower() then
+					prefix += 1
+				else
+					break
+				end
+			end
+
+			return score + prefix * 0.1 * (1 - score)
+		end
+
+		local function containsScore(query, text)
+			query = query:lower()
+			text = text:lower()
+
+			if query == text then
+				return 1
+			end
+
+			if text:find(query, 1, true) then
+				return 0.85
+			end
+
+			return 0
+		end
+
+		local function tokenScore(query, text)
+			local queryTokens = string.split(query:lower(), " ")
+			text = text:lower()
+
+			local matched = 0
+
+			for _, token in ipairs(queryTokens) do
+				if token ~= "" and text:find(token, 1, true) then
+					matched += 1
+				end
+			end
+
+			if #queryTokens == 0 then
+				return 0
+			end
+
+			return matched / #queryTokens
+		end
+
+		local function fuzzyScore(query, name)
+			query = query:lower()
+			name = name:lower()
+
+			if query == name then
+				return 1
+			end
+
+			local contains = containsScore(query, name)
+			local token = tokenScore(query, name)
+			local jw = jaroWinkler(query, name)
+			local levenshteinScore = levenshteinSimilarity(query, name)
+
+			local score =
+				(contains * 0.35)
+				+ (token * 0.10)
+				+ (jw * 0.30)
+				+ (levenshteinScore * 0.25)
+
+			return math.clamp(score, 0, 1)
 		end
 
 		local function matchProperty(inst, prop)
-			local ok, val = pcall(function()
+			local ok, value = pcall(function()
 				return tostring(inst[prop.name])
 			end)
-			return ok and val == prop.value
+
+			return ok and value == prop.value
 		end
 
-		local function inRadius(inst, r)
-			if not inst:IsA("BasePart") then return false end
-			local pos = Vector3.new(r.x, r.y, r.z)
-			return (inst.Position - pos).Magnitude <= r.distance
+		local function addResult(inst, score)
+			table.insert(results, {
+				Name = inst.Name,
+				ClassName = inst.ClassName,
+				Path = inst:GetFullName(),
+				Score = math.round(score * 1000) / 1000
+			})
 		end
 
 		local function search(inst, currentDepth)
-			if currentDepth <= 0 or #results >= limit then return end
+			if currentDepth <= 0 then
+				return
+			end
+
 			for _, child in inst:GetChildren() do
 				local pass = true
+				local score = 1
 
-				if args.name and not fuzzyMatch(child.Name, args.name) then
-					pass = false
+				if args.name then
+					score = fuzzyScore(args.name, child.Name)
+
+					if score < 0.30 then
+						pass = false
+					end
 				end
+
 				if pass and args.class_name and child.ClassName ~= args.class_name then
 					pass = false
 				end
+
 				if pass and args.tag and not CollectionService:HasTag(child, args.tag) then
 					pass = false
 				end
+
 				if pass and args.property and not matchProperty(child, args.property) then
-					pass = false
-				end
-				if pass and args.radius and not inRadius(child, args.radius) then
 					pass = false
 				end
 
 				if pass then
-					table.insert(results, {
-						Name = child.Name,
-						ClassName = child.ClassName,
-						Path = child:GetFullName()
-					})
+					addResult(child, score)
 				end
 
 				search(child, currentDepth - 1)
 			end
 		end
 
-		if args.tag and not args.name and not args.class_name and not args.property and not args.radius and not args.workspace_only then
+		if args.tag
+			and not args.name
+			and not args.class_name
+			and not args.property
+			and not args.workspace_only
+		then
 			for _, inst in CollectionService:GetTagged(args.tag) do
-				if #results >= limit then break end
-				table.insert(results, {
-					Name = inst.Name,
-					ClassName = inst.ClassName,
-					Path = inst:GetFullName()
-				})
+				addResult(inst, 1)
 			end
 		else
 			search(root, depth)
 		end
 
-		if #results == 0 then return "No instances found" end
+		table.sort(results, function(a, b)
+			return a.Score > b.Score
+		end)
+
+		if #results > limit then
+			local trimmed = table.create(limit)
+
+			for i = 1, limit do
+				trimmed[i] = results[i]
+			end
+
+			results = trimmed
+		end
+
+		if #results == 0 then
+			return "No instances found"
+		end
+
 		return HttpService:JSONEncode(results)
 	end
 }
+
 
 Tools["roblox_list_children"] = {
 	Category = "roblox_read",
