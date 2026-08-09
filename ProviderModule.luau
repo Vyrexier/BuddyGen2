@@ -11,10 +11,11 @@ local Providers = {
 				["Authorization"] = "Bearer " .. apiKey
 			}
 		end,
-		Body = function(model, messages)
+		Body = function(model, messages , tools)
 			return HttpService:JSONEncode({
 				model = model,
-				messages = messages
+				messages = messages,
+				tools = tools
 			})
 		end,
 		Parse = function(body)
@@ -35,12 +36,12 @@ local function GetHeaders(provider, apiKey)
 	return config.Headers(apiKey)
 end
 
-local function GetBody(provider, model, messages)
+local function GetBody(provider, model, messages , tools)
 	local config = Providers[provider]
 	if not config or not config.Body then
 		return false
 	end
-	return config.Body(model, messages)
+	return config.Body(model, messages , tools)
 end
 
 local function ParseResponse(provider, body)
@@ -65,7 +66,7 @@ function Module.GetProviderNames()
 	return names
 end
 
-function Module.Send(provider, model, apiKey, messages, callback)
+function Module.Send(provider, model, apiKey, messages, tools , callback)
 	local config = Providers[provider]
 	if not config then
 		callback(false, "Unknown provider: " .. tostring(provider))
@@ -78,7 +79,7 @@ function Module.Send(provider, model, apiKey, messages, callback)
 				Url = config.URL,
 				Method = "POST",
 				Headers = GetHeaders(provider, apiKey),
-				Body = GetBody(provider, model, messages)
+				Body = GetBody(provider, model, messages , tools)
 			})
 		end)
 
