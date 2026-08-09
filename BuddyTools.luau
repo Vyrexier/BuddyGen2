@@ -312,4 +312,61 @@ Tools["roblox_query"] = {
 	end
 }
 
+function ToolModule.GetToolList()
+	local list = {}
+
+	table.insert(list, {
+		type = "function",
+		["function"] = {
+			name = "buddy_request_tools",
+			description = Tools["buddy_request_tools"].Description,
+			parameters = Tools["buddy_request_tools"].Parameters
+		}
+	})
+
+	for cat in UnlockedCategories do
+		local catTools = Categories[cat]
+		if catTools then
+			for _, toolName in catTools do
+				local tool = Tools[toolName]
+				if tool then
+					table.insert(list, {
+						type = "function",
+						["function"] = {
+							name = toolName,
+							description = tool.Description,
+							parameters = tool.Parameters
+						}
+					})
+				end
+			end
+		end
+	end
+
+	return list
+end
+
+function ToolModule.HandleToolCall(toolCall)
+	local name = toolCall["function"].name
+	local tool = Tools[name]
+
+	if not tool then
+		return false, "Unknown tool: " .. name
+	end
+
+	local ok, args = pcall(HttpService.JSONDecode, HttpService, toolCall["function"].arguments)
+	if not ok then return false, "Invalid arguments" end
+
+	local success, result = pcall(tool.Function, args)
+	if not success then return false, "Error: " .. tostring(result) end
+
+	return true, tostring(result)
+end
+
+function ToolModule.ClearSession()
+	UnlockedCategories = {}
+	InstanceCache = {}
+	CurrentCheckpoint = game
+end
+
 return ToolModule
