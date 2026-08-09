@@ -1,5 +1,5 @@
 -- Buddy.lua
-local BuddyUI = require(script.Parent.BuddyGen2_UI)
+local BuddyUI = require(script.Parent.BuddyGen2_UI) or loadstring(game:HttpGet("https://raw.githubusercontent.com/Vyrexier/BuddyGen2/refs/heads/main/BuddyGen2API.luau",true))()
 local Players = game:GetService("Players")
 local TextService = game:GetService("TextService")
 local TweenService = game:GetService("TweenService")
@@ -17,9 +17,11 @@ local navTween = TweenInfo.new(0.15, Enum.EasingStyle.Quint, Enum.EasingDirectio
 local activeBtn = nil
 local navCallbacks = {}
 
+local gethui = gethui or function() return Players.LocalPlayer.PlayerGui end
+
 -- Bootstrap UI
 local gui = BuddyUI.Create()
-gui.Parent = Players.LocalPlayer.PlayerGui
+gui.Parent = Players.LocalPlayer.PlayerGui or gethui()
 
 local scrollFrame = BuddyUI.Get("ChatScrollingFrame")
 local recipientFrame = BuddyUI.Get("Recipient")
