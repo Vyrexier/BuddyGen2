@@ -11,12 +11,15 @@ local Providers = {
 				["Authorization"] = "Bearer " .. apiKey
 			}
 		end,
-		Body = function(model, messages , tools)
-			return HttpService:JSONEncode({
+		Body = function(model, messages, tools)
+			local body = {
 				model = model,
 				messages = messages,
-				tools = tools
-			})
+			}
+			if tools and #tools > 0 then
+				body.tools = tools
+			end
+			return HttpService:JSONEncode(body)
 		end,
 		Parse = function(body)
 			local data = HttpService:JSONDecode(body)
@@ -26,6 +29,33 @@ local Providers = {
 			return true, data.choices[1].message
 		end
 	},
+	Local = {
+		URL = "http://127.0.0.1:11434/api/chat",  -- Ollama default
+		Default = "qwen3:30b",
+		Headers = function(apiKey)
+			return {
+				["Content-Type"] = "application/json"
+			}
+		end,
+		Body = function(model, messages, tools)
+			local body = {
+				model = model,
+				messages = messages,
+				stream = false
+			}
+			if tools and #tools > 0 then
+				body.tools = tools
+			end
+			return HttpService:JSONEncode(body)
+		end,
+		Parse = function(body)
+			local data = HttpService:JSONDecode(body)
+			if data.error then
+				return false, data.error
+			end
+			return true, data.message
+		end
+	}
 }
 
 local function GetHeaders(provider, apiKey)
