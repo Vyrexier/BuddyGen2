@@ -47,7 +47,9 @@ local Providers = {
 			if tools and #tools > 0 then
 				body.tools = tools
 			end
-			return HttpService:JSONEncode(body)
+			local encoded = HttpService:JSONEncode(body)
+			print("[Local Body]", encoded)
+			return encoded
 		end,
 		Parse = function(body)
 			local data = HttpService:JSONDecode(body)
