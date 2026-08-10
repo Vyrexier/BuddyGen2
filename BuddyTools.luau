@@ -88,12 +88,12 @@ local function ParseArg(v)
 end
 
 local CategoryInfo = {
-	roblox_read = "Read-only access to Roblox instances, players, properties, attributes, tags, events, and world queries",
-	roblox_cache = "Cache and retrieve Roblox instances by key for reuse across tool calls",
-	roblox_interaction = "Simulate player interactions such as clicking detectors, triggering proximity prompts, and touch events",
-	roblox_execution = "Execute Luau code directly in the Roblox runtime or decompile scripts",
+	roblox_read = "Read-only access to Roblox instances, players, properties, attributes, tags, events, radius queries, timestamps, and checkpoint-based navigation",
+	roblox_cache = "Cache and retrieve Roblox instances by key for efficient reuse across multiple tool calls",
+	roblox_interaction = "Simulate player interactions including ClickDetectors, ProximityPrompts, and touch events between BaseParts",
+	roblox_execution = "Execute Luau code in the Roblox runtime, set instance properties, and decompile scripts",
 	filesystem = "Read, write, append, delete, and manage files and folders in the executor filesystem",
-	roblox_remote = "Fire RemoteEvents and invoke RemoteFunctions to communicate with the server"
+	roblox_remote = "Fire RemoteEvents and invoke RemoteFunctions with ordered arguments to communicate with the server"
 }
 
 local Categories = {
