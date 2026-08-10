@@ -4,12 +4,61 @@ local Players = cloneref(game:GetService("Players"))
 local CollectionService = cloneref(game:GetService("CollectionService"))
 
 local ToolModule = {}
-local InstanceCache = {}
+
 
 -- Session state
+local MAX_EVENTS = 300
+local EventQueue = {}
 local UnlockedCategories = {}
 local InstanceCache = {}
 local CurrentCheckpoint = game
+
+local PermissionLevel = 0
+
+local CategoryPermission = {
+	roblox_read = 0,
+	roblox_cache = 0,
+	roblox_interaction = 1,
+	roblox_remote = 1,
+	roblox_execution = 2,
+	filesystem = 1
+}
+
+
+local function SerializeArg(v)
+	local t = typeof(v)
+	if t == "nil" then return { type = "nil" } end
+	if t == "boolean" or t == "number" or t == "string" then return { type = t, value = v } end
+	if t == "Instance" then return { type = "Instance", value = v:GetFullName(), class = v.ClassName } end
+	if t == "Vector3" then return { type = "Vector3", value = { x = v.X, y = v.Y, z = v.Z } } end
+	if t == "Vector2" then return { type = "Vector2", value = { x = v.X, y = v.Y } } end
+	if t == "CFrame" then return { type = "CFrame", value = { x = v.X, y = v.Y, z = v.Z } } end
+	if t == "Color3" then return { type = "Color3", value = { r = v.R, g = v.G, b = v.B } } end
+	if t == "table" then
+		local result = {}
+		for k, val in pairs(v) do result[tostring(k)] = SerializeArg(val) end
+		return { type = "table", value = result }
+	end
+	return { type = t, value = tostring(v) }
+end
+
+
+local function SerializeArgs(...)
+	local result = {}
+	for i, v in ipairs({...}) do result[i] = SerializeArg(v) end
+	return result
+end
+
+local function PushEvent(eventType, data)
+	table.insert(EventQueue, {
+		type = eventType,
+		timestamp = os.time(),
+		data = data
+	})
+	while #EventQueue > MAX_EVENTS do
+		table.remove(EventQueue, 1)
+	end
+end
 
 local function GetTimeStamp()
 	return os.date("!%Y-%m-%dT%H:%M:%SZ")
@@ -28,13 +77,23 @@ local function ResolvePath(path)
 	return current
 end
 
--- Categories และ description สั้นๆ
+local function ParseArg(v)
+	if v == "true" then return true end
+	if v == "false" then return false end
+	local num = tonumber(v)
+	if num then return num end
+	local path = v:match("^instance:(.+)$")
+	if path then return ResolvePath(path) end
+	return v
+end
+
 local CategoryInfo = {
-	roblox_read = "Find, search, list instances, get player info",
-	roblox_cache = "Cache and retrieve instances for later use",
-	roblox_interaction = "Fire click detectors, proximity prompts, touch events",
-	roblox_execution = "Execute Luau code, decompile scripts",
-	filesystem = "Read, write, delete files and folders"
+	roblox_read = "Read-only access to Roblox instances, players, properties, attributes, tags, events, and world queries",
+	roblox_cache = "Cache and retrieve Roblox instances by key for reuse across tool calls",
+	roblox_interaction = "Simulate player interactions such as clicking detectors, triggering proximity prompts, and touch events",
+	roblox_execution = "Execute Luau code directly in the Roblox runtime or decompile scripts",
+	filesystem = "Read, write, append, delete, and manage files and folders in the executor filesystem",
+	roblox_remote = "Fire RemoteEvents and invoke RemoteFunctions to communicate with the server"
 }
 
 local Categories = {
@@ -50,7 +109,9 @@ local Categories = {
 		"roblox_get_attribute",
 		"roblox_get_attributes",
 		"roblox_get_tags",
-		"roblox_get_instances_in_radius"
+		"roblox_get_instances_in_radius",
+		"roblox_get_events",
+		"roblox_event_status"
 	},
 	roblox_cache = {
 		"roblox_cache_instance",
@@ -65,7 +126,8 @@ local Categories = {
 	},
 	roblox_execution = {
 		"roblox_execute_code",
-		"roblox_decompile_script"
+		"roblox_decompile_script",
+		"roblox_set_property"
 	},
 	filesystem = {
 		"fs_read_file",
@@ -78,10 +140,232 @@ local Categories = {
 		"fs_is_file",
 		"fs_is_folder",
 		"fs_load_file"
+	},
+	roblox_remote = {
+		"roblox_fire_server",
+		"roblox_invoke_server",
 	}
 }
 
 local Tools = {}
+
+Tools["roblox_set_property"] = {
+	Category = "roblox_execution",
+	Description = "Set a property value on a Roblox Instance. Supports string, number, boolean, Vector3, Color3, and CFrame values.",
+	Parameters = {
+		type = "object",
+		properties = {
+			path = {
+				type = "string",
+				description = "Path to the Instance"
+			},
+			property = {
+				type = "string",
+				description = "Property name to set e.g. Transparency, BrickColor, Position"
+			},
+			value = {
+				type = "string",
+				description = "Value to set. For Vector3 use 'x,y,z'. For Color3 use 'r,g,b' (0-1). For boolean use 'true'/'false'. For number use plain number."
+			},
+			value_type = {
+				type = "string",
+				enum = {"string", "number", "boolean", "Vector3", "Color3", "CFrame"},
+				description = "Type of the value to set. Default: string"
+			}
+		},
+		required = {"path", "property", "value"}
+	},
+	Function = function(args)
+		local instance = ResolvePath(args.path)
+		if not instance then
+			return "Instance not found: " .. tostring(args.path)
+		end
+
+		local valueType = args.value_type or "string"
+		local parsed
+
+		if valueType == "number" then
+			parsed = tonumber(args.value)
+			if not parsed then return "Invalid number: " .. args.value end
+
+		elseif valueType == "boolean" then
+			if args.value == "true" then parsed = true
+			elseif args.value == "false" then parsed = false
+			else return "Invalid boolean: " .. args.value end
+
+		elseif valueType == "Vector3" then
+			local x, y, z = args.value:match("([^,]+),([^,]+),([^,]+)")
+			if not x then return "Invalid Vector3 format. Use 'x,y,z'" end
+			parsed = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
+
+		elseif valueType == "Color3" then
+			local r, g, b = args.value:match("([^,]+),([^,]+),([^,]+)")
+			if not r then return "Invalid Color3 format. Use 'r,g,b' (0-1)" end
+			parsed = Color3.new(tonumber(r), tonumber(g), tonumber(b))
+
+		elseif valueType == "CFrame" then
+			local x, y, z = args.value:match("([^,]+),([^,]+),([^,]+)")
+			if not x then return "Invalid CFrame format. Use 'x,y,z'" end
+			parsed = CFrame.new(tonumber(x), tonumber(y), tonumber(z))
+
+		else
+			parsed = args.value
+		end
+
+		local success, err = pcall(function()
+			instance[args.property] = parsed
+		end)
+
+		if not success then
+			return "Failed to set property: " .. tostring(err)
+		end
+
+		return HttpService:JSONEncode({
+			Path = instance:GetFullName(),
+			Property = args.property,
+			Value = tostring(parsed),
+			Success = true
+		})
+	end
+}
+
+Tools["roblox_fire_server"] = {
+	Category = "roblox_remote",
+	Description = "Fire a RemoteEvent to the server with optional ordered arguments",
+	Parameters = {
+		type = "object",
+		properties = {
+			path = {
+				type = "string",
+				description = "Path to the RemoteEvent instance"
+			},
+			args = {
+				type = "array",
+				description = "Arguments in ORDER. Types: plain string, number ('42'), boolean ('true'/'false'), instance path ('instance:game.Workspace.Part'). Order matters.",
+				items = {
+					type = "object",
+					properties = {
+						value = {
+							type = "string",
+							description = "The value to pass"
+						},
+						index = {
+							type = "number",
+							description = "Position in the argument list (1-based)"
+						}
+					},
+					required = {"value", "index"}
+				}
+			}
+		},
+		required = {"path"}
+	},
+	Function = function(args)
+		local instance = ResolvePath(args.path)
+		if not instance then
+			return "Instance not found: " .. tostring(args.path)
+		end
+		if not instance:IsA("RemoteEvent") then
+			return "Instance is not a RemoteEvent: " .. instance:GetFullName()
+		end
+
+		local fireArgs = {}
+		if args.args then
+			table.sort(args.args, function(a, b)
+				return (a.index or 0) < (b.index or 0)
+			end)
+			for _, item in ipairs(args.args) do
+				table.insert(fireArgs, ParseArg(item.value))
+			end
+		end
+
+		local success, err = pcall(function()
+			instance:FireServer(table.unpack(fireArgs))
+		end)
+
+		if not success then
+			return "Failed to fire RemoteEvent: " .. tostring(err)
+		end
+
+		return HttpService:JSONEncode({
+			Path = instance:GetFullName(),
+			Args = #fireArgs,
+			Success = true
+		})
+	end
+}
+
+Tools["roblox_invoke_server"] = {
+	Category = "roblox_remote",
+	Description = "Invoke a RemoteFunction on the server with optional ordered arguments and return the result",
+	Parameters = {
+		type = "object",
+		properties = {
+			path = {
+				type = "string",
+				description = "Path to the RemoteFunction instance"
+			},
+			args = {
+				type = "array",
+				description = "Arguments in ORDER. Types: plain string, number ('42'), boolean ('true'/'false'), instance path ('instance:game.Workspace.Part'). Order matters.",
+				items = {
+					type = "object",
+					properties = {
+						value = {
+							type = "string",
+							description = "The value to pass"
+						},
+						index = {
+							type = "number",
+							description = "Position in the argument list (1-based)"
+						}
+					},
+					required = {"value", "index"}
+				}
+			}
+		},
+		required = {"path"}
+	},
+	Function = function(args)
+		local instance = ResolvePath(args.path)
+		if not instance then
+			return "Instance not found: " .. tostring(args.path)
+		end
+		if not instance:IsA("RemoteFunction") then
+			return "Instance is not a RemoteFunction: " .. instance:GetFullName()
+		end
+
+		local invokeArgs = {}
+		if args.args then
+			table.sort(args.args, function(a, b)
+				return (a.index or 0) < (b.index or 0)
+			end)
+			for _, item in ipairs(args.args) do
+				table.insert(invokeArgs, ParseArg(item.value))
+			end
+		end
+
+		local success, result = pcall(function()
+			return instance:InvokeServer(table.unpack(invokeArgs))
+		end)
+
+		if not success then
+			return "Failed to invoke RemoteFunction: " .. tostring(result)
+		end
+
+		local ok, encoded = pcall(HttpService.JSONEncode, HttpService, {
+			Path = instance:GetFullName(),
+			Success = true,
+			Result = result
+		})
+
+		if not ok then
+			return "Invoked successfully, result: " .. tostring(result)
+		end
+
+		return encoded
+	end
+}
 
 Tools["buddy_request_tools"] = {
 	Description = "List available tool categories or unlock them. Call list first, then unlock what you need.",
@@ -113,20 +397,19 @@ Tools["buddy_request_tools"] = {
 			return table.concat(result, "\n")
 
 		elseif args.action == "unlock" then
-			if not args.categories or #args.categories == 0 then
-				return "No categories specified"
-			end
 			local unlocked = {}
 			for _, cat in ipairs(args.categories) do
 				if CategoryInfo[cat] then
-					UnlockedCategories[cat] = true
-					table.insert(unlocked, cat)
+					local required = CategoryPermission[cat] or 0
+					if PermissionLevel >= required then
+						UnlockedCategories[cat] = true
+						table.insert(unlocked, cat)
+					else
+						table.insert(unlocked, cat .. " (permission denied, requires level " .. required .. ")")
+					end
 				end
 			end
-			if #unlocked == 0 then
-				return "No valid categories found"
-			end
-			return "Unlocked: " .. table.concat(unlocked, ", ")
+			return "Result: " .. table.concat(unlocked, ", ")
 		end
 
 		return "Unknown action: " .. tostring(args.action)
@@ -1268,42 +1551,66 @@ Tools["roblox_fire_touch_interest"] = {
 
 Tools["roblox_execute_code"] = {
 	Category = "roblox_execution",
-
-	Description = "Execute Luau code locally in Roblox and return the result.",
-
+	Description = "Execute Luau code locally in Roblox and return the result including print output",
 	Parameters = {
 		type = "object",
-
 		properties = {
 			code = {
 				type = "string",
 				description = "Luau code to execute"
 			}
 		},
-
-		required = {
-			"code"
-		}
+		required = {"code"}
 	},
-
 	Function = function(args)
 		if type(args.code) ~= "string" or args.code == "" then
 			return "Code is required"
 		end
 
 		local fn, compileError = loadstring(args.code)
-
 		if not fn then
-			return "Syntax Error: " .. tostring(compileError)
+			return HttpService:JSONEncode({
+				Success = false,
+				Error = "Syntax Error: " .. tostring(compileError),
+				Logs = {}
+			})
 		end
+
+		local logs = {}
+
+		local oldPrint = hookfunction(print, function(...)
+			if checkcaller() then
+				local parts = {}
+				for _, v in ipairs({...}) do
+					table.insert(parts, tostring(v))
+				end
+				table.insert(logs, table.concat(parts, "\t"))
+			end
+			return oldPrint(...)
+		end)
+
+		local oldWarn = hookfunction(warn, function(...)
+			if checkcaller() then
+				local parts = {}
+				for _, v in ipairs({...}) do
+					table.insert(parts, tostring(v))
+				end
+				table.insert(logs, "[warn] " .. table.concat(parts, "\t"))
+			end
+			return oldWarn(...)
+		end)
 
 		local success, result = pcall(fn)
 
-		if not success then
-			return "Runtime Error: " .. tostring(result)
-		end
+		restorefunction(print)
+		restorefunction(warn)
 
-		return tostring(result)
+		return HttpService:JSONEncode({
+			Success = success,
+			Result = success and tostring(result) or nil,
+			Error = not success and tostring(result) or nil,
+			Logs = logs
+		})
 	end
 }
 
@@ -1837,6 +2144,98 @@ Tools["fs_load_file"] = {
 	end
 }
 
+Tools["roblox_get_events"] = {
+	Category = "roblox_read",
+	Description = "Get recent game events such as RemoteEvent calls and character events. Returns events with type, timestamp, and args.",
+	Parameters = {
+		type = "object",
+		properties = {
+			limit = {
+				type = "number",
+				description = "Max events to return. Default: 50"
+			},
+			filter = {
+				type = "string",
+				description = "Filter by event type e.g. FireServer, CharacterDied. Leave empty for all."
+			}
+		},
+		required = {}
+	},
+	Function = function(args)
+		local limit = math.min(args.limit or 50, MAX_EVENTS)
+		local filter = args.filter
+
+		local result = {}
+		for i = #EventQueue, 1, -1 do
+			if #result >= limit then break end
+			local event = EventQueue[i]
+			if not filter or event.type == filter then
+				table.insert(result, event)
+			end
+		end
+
+		if #result == 0 then return "No events found" end
+
+		return HttpService:JSONEncode({
+			Total = #EventQueue,
+			Returned = #result,
+			Events = result
+		})
+	end
+}
+
+Tools["roblox_event_status"] = {
+	Category = "roblox_read",
+	Description = "Check how many events are currently queued and what types exist",
+	Parameters = {
+		type = "object",
+		properties = {
+			_placeholder = {
+				type = "string",
+				description = "Unused placeholder parameter"
+			}
+		},
+		required = {}
+	},
+	Function = function()
+		local typeCounts = {}
+		for _, event in EventQueue do
+			typeCounts[event.type] = (typeCounts[event.type] or 0) + 1
+		end
+		return HttpService:JSONEncode({
+			Total = #EventQueue,
+			Max = MAX_EVENTS,
+			Types = typeCounts
+		})
+	end
+}
+
+function ToolModule.StartHooks()
+	local oldNamecall
+	oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+		local method = getnamecallmethod()
+
+		if method == "FireServer" or method == "InvokeServer" or method == "FireAllClients" then
+			local ok, serialized = pcall(SerializeArgs, ...)
+			PushEvent(method, {
+				remote = self:GetFullName(),
+				args = ok and serialized or "failed to serialize"
+			})
+		end
+
+		return oldNamecall(self, ...)
+	end)
+
+	local localPlayer = Players.LocalPlayer
+	localPlayer.CharacterAdded:Connect(function(character)
+		PushEvent("CharacterSpawned", { character = character:GetFullName() })
+		local humanoid = character:WaitForChild("Humanoid")
+		humanoid.Died:Connect(function()
+			PushEvent("CharacterDied", { character = character:GetFullName() })
+		end)
+	end)
+end
+
 function ToolModule.GetToolList()
 	
 	print("[BuddyTools] UnlockedCategories:")
@@ -1904,6 +2303,14 @@ function ToolModule.HandleToolCall(toolCall)
 	if not success then return false, "Error: " .. tostring(result) end
 
 	return true, tostring(result)
+end
+
+function ToolModule.SetPermission(level)
+	PermissionLevel = tonumber(level) or 0
+end
+
+function ToolModule.GetPermission()
+	return PermissionLevel
 end
 
 function ToolModule.ClearSession()
