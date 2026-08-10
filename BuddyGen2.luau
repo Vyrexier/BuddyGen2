@@ -138,6 +138,10 @@ BuddyAPI:AddNavButton("Settings", 2, function(active)
 	end
 end)
 
+BuddyAPI:AddDropdown("Permission", {"0 - Read", "1 - Safe", "2 - Restricted"}, function(v)
+	BuddyTools.SetPermission(tonumber(v:sub(1,1)))
+end)
+
 -- Send
 local function Send(toolDepth)
 	toolDepth = toolDepth or 0
@@ -208,4 +212,3 @@ BuddyAPI:AttachOnSend(function(msg)
 
 	Send()
 end)
-
