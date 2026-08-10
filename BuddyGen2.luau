@@ -138,8 +138,18 @@ BuddyAPI:AddNavButton("Settings", 2, function(active)
 	end
 end)
 
-BuddyAPI:AddDropdown("Permission", {"0 - Read", "1 - Safe", "2 - Restricted"}, function(v)
-	BuddyTools.SetPermission(tonumber(v:sub(1,1)))
+BuddyAPI:AddHeader("Permission")
+BuddyAPI:AddDescription("Control what tools AI can access")
+BuddyAPI:AddDivider()
+
+BuddyAPI:AddDropdown("Permission Level", {
+	"0 - Read Only",
+	"1 - Safe (Filesystem + Remote)",
+	"2 - Restricted (Execution + Set Property)"
+}, function(v)
+	local level = tonumber(v:sub(1, 1))
+	BuddyTools.SetPermission(level)
+	BuddyAPI:Receive("Permission level set to " .. level)
 end)
 
 -- Send
@@ -212,3 +222,6 @@ BuddyAPI:AttachOnSend(function(msg)
 
 	Send()
 end)
+
+BuddyTools.StartHooks()
+
