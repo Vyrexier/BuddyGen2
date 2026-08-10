@@ -31,7 +31,7 @@ local Providers = {
 	},
 	Local = {
 		URL = "http://127.0.0.1:11434/api/chat",  -- Ollama default
-		Default = "qwen3:30b",
+		Default = "qwen2.5:7b",
 		Headers = function(apiKey)
 			return {
 				["Content-Type"] = "application/json"
@@ -41,7 +41,8 @@ local Providers = {
 			local body = {
 				model = model,
 				messages = messages,
-				stream = false
+				stream = false,
+				think = false
 			}
 			if tools and #tools > 0 then
 				body.tools = tools
