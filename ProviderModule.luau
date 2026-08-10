@@ -12,13 +12,31 @@ local Providers = {
 			}
 		end,
 		Body = function(model, messages, tools)
+			-- Groq/OpenAI format requires:
+			-- tool_calls[].function.arguments = JSON string
+			for _, message in ipairs(messages) do
+				if message.tool_calls then
+					for _, toolCall in ipairs(message.tool_calls) do
+						local fn = toolCall["function"]
+
+						if fn and fn.arguments ~= nil then
+							if type(fn.arguments) ~= "string" then
+								fn.arguments = HttpService:JSONEncode(fn.arguments)
+							end
+						end
+					end
+				end
+			end
+
 			local body = {
 				model = model,
 				messages = messages,
 			}
+
 			if tools and #tools > 0 then
 				body.tools = tools
 			end
+
 			return HttpService:JSONEncode(body)
 		end,
 		Parse = function(body)
