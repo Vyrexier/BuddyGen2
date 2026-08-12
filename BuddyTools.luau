@@ -760,7 +760,14 @@ Tools["roblox_list_cache"] = {
 	Category = "roblox_cache",
 	Description = "List all cached instances",
 	Parameters = {
-		type = "object"
+		type = "object",
+		properties = {
+			_placeholder = {
+				type = "string",
+				description = "Unused placeholder parameter"
+			}
+		},
+		required = {}
 	},
 	Function = function(args)
 		local entries = {}
@@ -2212,19 +2219,21 @@ Tools["roblox_event_status"] = {
 
 function ToolModule.StartHooks()
 	local oldNamecall
-	oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+	oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
 		local method = getnamecallmethod()
 
-		if method == "FireServer" or method == "InvokeServer" or method == "FireAllClients" then
-			local ok, serialized = pcall(SerializeArgs, ...)
-			PushEvent(method, {
-				remote = self:GetFullName(),
-				args = ok and serialized or "failed to serialize"
-			})
+		if not checkcaller() then
+			if method == "FireServer" or method == "InvokeServer" or method == "FireAllClients" then
+				local ok, serialized = pcall(SerializeArgs, ...)
+				PushEvent(method, {
+					remote = self:GetFullName(),
+					args = ok and serialized or "failed to serialize"
+				})
+			end
 		end
 
 		return oldNamecall(self, ...)
-	end)
+	end))
 
 	local localPlayer = Players.LocalPlayer
 	localPlayer.CharacterAdded:Connect(function(character)
